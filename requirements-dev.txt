@@ -1,0 +1,7 @@
+# Development / CI dependencies (tests, linting, sample-PDF generation).
+# Install with:  pip install -r requirements-dev.txt
+-r requirements.txt
+
+pytest==9.1.1
+reportlab==5.0.0
+ruff==0.15.21

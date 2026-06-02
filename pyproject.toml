@@ -1,0 +1,23 @@
+[project]
+name = "rag-document-chatbot"
+version = "1.0.0"
+description = "Chat with your PDFs - a modular, swappable RAG pipeline (LangChain + FAISS + HuggingFace/OpenAI + Streamlit)."
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # LangChain / pydantic ecosystems are noisy with deprecations across minor
+    # versions; keep test output readable without hiding our own warnings.
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

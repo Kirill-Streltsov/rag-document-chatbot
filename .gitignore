@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Env & secrets
+.env
+.streamlit/secrets.toml
+
+# Caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.hf_cache/
+*.faiss
+
+# Runtime artifacts
+data/uploads/
+indexes/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
