@@ -1,0 +1,11 @@
+# Streamlit configuration (safe to commit - no secrets here).
+[theme]
+primaryColor = "#4F8BF9"
+base = "light"
+
+[server]
+# Uploaded reports can be large; 25 MB is comfortable for PDFs.
+maxUploadSize = 25
+
+[browser]
+gatherUsageStats = false
