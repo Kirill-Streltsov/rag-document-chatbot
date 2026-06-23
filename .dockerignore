@@ -1,0 +1,15 @@
+.venv/
+.git/
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.hf_cache/
+.env
+.streamlit/secrets.toml
+indexes/
+data/uploads/
+*.md
+docs/
+.github/

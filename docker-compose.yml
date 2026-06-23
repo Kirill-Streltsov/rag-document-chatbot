@@ -1,0 +1,16 @@
+# Convenience wrapper: `docker compose up --build`
+# Reads HF_TOKEN (and any overrides) from a local .env file - see .env.example.
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    # Persist the model cache across restarts so re-runs are instant.
+    volumes:
+      - hf-cache:/home/appuser/.cache/huggingface
+    restart: unless-stopped
+
+volumes:
+  hf-cache:
