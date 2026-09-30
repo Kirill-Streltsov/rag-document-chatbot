@@ -39,10 +39,12 @@ class Config:
     # --- HuggingFace models ------------------------------------------------
     # Small, fast, 384-dim sentence embedder - runs locally on CPU, no key.
     hf_embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    # Instruction-tuned chat model served via the free HF Inference API.
+    # Instruction-tuned chat model served via the free HF Inference Providers.
     # Non-gated (Apache-2.0) so a fresh free token works without a license
-    # click. Swap via HF_CHAT_MODEL - see README for alternatives.
-    hf_chat_model: str = "Qwen/Qwen2.5-7B-Instruct"
+    # click, and served by many providers (groq, together, novita, ...) so it
+    # works with most accounts' enabled-provider settings. Swap via
+    # HF_CHAT_MODEL - see README for alternatives.
+    hf_chat_model: str = "openai/gpt-oss-20b"
     hf_token: str = ""
 
     # --- OpenAI models (optional) -----------------------------------------
