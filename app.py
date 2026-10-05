@@ -253,6 +253,10 @@ def main() -> None:
         disabled="store" not in st.session_state,
     )
     if question:
+        # Earlier turns (minus error notes) let the chain resolve follow-ups.
+        history = [
+            m for m in st.session_state.messages if not m["content"].startswith("⚠️")
+        ]
         st.session_state.messages.append({"role": "user", "content": question})
         with st.chat_message("user"):
             st.markdown(question)
@@ -271,8 +275,10 @@ def main() -> None:
                     )
                     retriever = build_retriever(st.session_state.store, cfg.top_k)
                     chain = build_qa_chain(llm, retriever)
-                    result = answer(chain, question)
+                    result = answer(chain, question, history=history)
                 st.markdown(result["answer"])
+                if result["question"] != question:
+                    st.caption(f"Searched for: *{result['question']}*")
                 _render_sources(result["sources"])
                 st.session_state.messages.append(
                     {"role": "assistant", "content": result["answer"], "sources": result["sources"]}

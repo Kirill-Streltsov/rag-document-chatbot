@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from ragchat.chain import answer, build_qa_chain, build_retriever
+from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+from ragchat.chain import (
+    MAX_HISTORY_MESSAGES,
+    answer,
+    build_qa_chain,
+    build_retriever,
+    history_to_messages,
+)
 from ragchat.ingest import build_vectorstore, split_documents
 
 
@@ -40,3 +48,42 @@ def test_chain_invoke_shape(sample_pages, fake_embeddings, fake_llm):
     result = chain.invoke("What was the revenue?")
     assert set(result) >= {"input", "context", "answer"}
     assert result["input"] == "What was the revenue?"
+
+
+def test_first_question_is_not_rewritten(sample_pages, fake_embeddings, fake_llm):
+    chain = _make_chain(sample_pages, fake_embeddings, fake_llm)
+    out = answer(chain, "What was the 2024 revenue?", history=[])
+    # No history -> no rewrite call, the question is searched as asked.
+    assert out["question"] == "What was the 2024 revenue?"
+    assert out["answer"] == "The 2024 revenue was 84.6 million euros."
+
+
+def test_follow_up_is_rewritten_before_retrieval(sample_pages, fake_embeddings):
+    # The fake model answers the rewrite prompt first, then the QA prompt.
+    llm = FakeListChatModel(
+        responses=['"Who was the CEO of Acme in 2024?"', "Jane Doe."]
+    )
+    chain = _make_chain(sample_pages, fake_embeddings, llm)
+    history = [
+        {"role": "user", "content": "What was the 2024 revenue?"},
+        {"role": "assistant", "content": "84.6 million euros."},
+    ]
+    out = answer(chain, "And who ran the company?", history=history)
+    assert out["question"] == "Who was the CEO of Acme in 2024?"  # quotes stripped
+    assert out["answer"] == "Jane Doe."
+
+
+def test_empty_rewrite_falls_back_to_original(sample_pages, fake_embeddings):
+    llm = FakeListChatModel(responses=["   ", "Some answer."])
+    chain = _make_chain(sample_pages, fake_embeddings, llm)
+    history = [{"role": "user", "content": "Hi"}]
+    out = answer(chain, "What was the revenue?", history=history)
+    assert out["question"] == "What was the revenue?"
+
+
+def test_history_is_trimmed_to_recent_turns():
+    history = [{"role": "user", "content": str(i)} for i in range(20)]
+    history.append({"role": "assistant", "content": "x"})
+    messages = history_to_messages(history)
+    assert len(messages) == MAX_HISTORY_MESSAGES
+    assert messages[-1].content == "x"

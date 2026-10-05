@@ -10,19 +10,30 @@ from stable core primitives so it doesn't depend on the moving
 The LLM and retriever are injected, not constructed here, which keeps this
 module trivially unit-testable with a fake model and keeps both the embedding
 model and the LLM swappable from the outside.
+
+Follow-up questions ("and in 2023?") are supported: when there is chat history,
+the question is first rewritten into a standalone one, and that rewritten
+question is what gets searched for and answered.
 """
 
 from __future__ import annotations
 
+from operator import itemgetter
 from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import Runnable, RunnableParallel, RunnablePassthrough
+from langchain_core.runnables import Runnable, RunnableLambda, RunnablePassthrough
 from langchain_core.vectorstores import VectorStore
 
-from .prompts import build_prompt
+from .prompts import build_condense_prompt, build_prompt
+
+# How much of the conversation the question rewriter sees (messages, not turns).
+MAX_HISTORY_MESSAGES = 6
+# A rewritten question longer than this is treated as the model rambling.
+MAX_REWRITE_CHARS = 400
 
 
 def build_retriever(vectorstore: VectorStore, top_k: int):
@@ -45,34 +56,71 @@ def _format_docs_for_prompt(docs: list[Document]) -> str:
     return "\n\n".join(blocks)
 
 
+def _as_payload(x: str | dict) -> dict[str, Any]:
+    """Accept a bare question or ``{"input": ..., "chat_history": [...]}``."""
+    if isinstance(x, str):
+        return {"input": x, "chat_history": []}
+    return {"input": x["input"], "chat_history": list(x.get("chat_history") or [])}
+
+
 def build_qa_chain(llm: BaseChatModel, retriever) -> Runnable:
     """Compose retriever + prompt + LLM into a retrieval-QA runnable.
 
-    ``chain.invoke("<question>")`` returns a dict with:
-        - ``input``:   the original question
-        - ``context``: the list of retrieved source Documents (for citations)
-        - ``answer``:  the model's grounded response string
+    ``chain.invoke("<question>")`` or
+    ``chain.invoke({"input": "<question>", "chat_history": [messages]})``
+    returns a dict with:
+        - ``input``:    the original question
+        - ``question``: the standalone question that was searched for (equal
+                        to ``input`` when there is no history)
+        - ``context``:  the list of retrieved source Documents (for citations)
+        - ``answer``:   the model's grounded response string
     """
     prompt = build_prompt()
+    condense = build_condense_prompt() | llm | StrOutputParser()
 
-    # Given {input, context:[Document]}, produce just the answer string.
+    def standalone_question(x: dict[str, Any]) -> str:
+        if not x["chat_history"]:
+            return x["input"]  # first question: no extra LLM call
+        rewritten = condense.invoke(x).strip().strip('"').strip()
+        # Fall back to the original wording if the model returns nothing usable.
+        if not rewritten or len(rewritten) > MAX_REWRITE_CHARS:
+            return x["input"]
+        return rewritten
+
+    # Given {question, context:[Document]}, produce just the answer string.
     generate = (
         {
             "context": lambda x: _format_docs_for_prompt(x["context"]),
-            "input": lambda x: x["input"],
+            "input": lambda x: x["question"],
         }
         | prompt
         | llm
         | StrOutputParser()
     )
 
-    # Retrieve first (the retriever takes the raw question string), keep the
-    # docs, then attach the generated answer alongside them.
-    retrieve = RunnableParallel(
-        input=RunnablePassthrough(),
-        context=retriever,
+    # Each step keeps the keys it was given and adds one more, so the retrieved
+    # docs are still there next to the answer for the citations.
+    return (
+        RunnableLambda(_as_payload)
+        | RunnablePassthrough.assign(question=RunnableLambda(standalone_question))
+        | RunnablePassthrough.assign(context=itemgetter("question") | retriever)
+        | RunnablePassthrough.assign(answer=generate)
     )
-    return retrieve | RunnablePassthrough.assign(answer=generate)
+
+
+def history_to_messages(history: list[dict[str, Any]]) -> list[BaseMessage]:
+    """Turn UI chat messages (``{"role", "content"}``) into LangChain messages.
+
+    Only the most recent turns are kept; that is all a follow-up needs, and it
+    keeps the rewrite prompt small.
+    """
+    messages: list[BaseMessage] = []
+    for msg in history[-MAX_HISTORY_MESSAGES:]:
+        if msg.get("role") == "user":
+            messages.append(HumanMessage(msg["content"]))
+        elif msg.get("role") == "assistant":
+            messages.append(AIMessage(msg["content"]))
+    return messages
 
 
 def _format_sources(docs: list[Document]) -> list[dict[str, Any]]:
@@ -91,13 +139,20 @@ def _format_sources(docs: list[Document]) -> list[dict[str, Any]]:
     return sources
 
 
-def answer(chain: Runnable, question: str) -> dict[str, Any]:
-    """Run a question through the chain and return a normalized result.
+def answer(
+    chain: Runnable, question: str, history: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    """Run a question (plus any earlier chat turns) through the chain.
 
-    Returns ``{"answer": str, "sources": list[dict]}``.
+    ``history`` is the conversation so far as ``{"role", "content"}`` dicts.
+    Returns ``{"answer": str, "question": str, "sources": list[dict]}``, where
+    ``question`` is the standalone question that was actually searched for.
     """
-    result = chain.invoke(question)
+    result = chain.invoke(
+        {"input": question, "chat_history": history_to_messages(history or [])}
+    )
     return {
         "answer": (result.get("answer") or "").strip(),
+        "question": result.get("question", question),
         "sources": _format_sources(result.get("context", [])),
     }
