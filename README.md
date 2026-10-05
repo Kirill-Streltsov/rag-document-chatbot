@@ -16,6 +16,8 @@ context.
 - Embeds the chunks and stores them in a FAISS index.
 - For each question, finds the most relevant chunks and passes them to the LLM.
 - If the answer is not in the document, it says so instead of making something up.
+- Handles follow-ups like "and in 2023?": with chat history, the question is
+  first rewritten into a standalone one, and that is what gets searched for.
 
 ```mermaid
 flowchart LR
@@ -27,6 +29,10 @@ flowchart LR
 By default it runs for free: embeddings run locally (sentence-transformers) and
 the LLM is a free hosted model on Hugging Face. You can switch to OpenAI from the
 sidebar if you have a key.
+
+Settings (models, chunking, top-k) are read from environment variables, a local
+`.env` file or the Streamlit secrets; see `.env.example`. The sidebar starts
+from those values.
 
 ## Run it locally
 
@@ -73,3 +79,15 @@ tests/            unit tests
 
 There are some notes on how I picked the chunk size and number of retrieved
 chunks in `docs/EXPERIMENTS.md`.
+
+## Limitations
+
+- Text only: pypdf reads the PDF's text layer, so scanned PDFs (images) are
+  rejected with a message; there is no OCR. Tables come out as plain text.
+- The index lives in the browser session and is rebuilt after a reload.
+- Retrieval is purely semantic. Exact codes or rare names can be missed; a
+  keyword (BM25) leg or a reranker would help.
+- The "answer only from the document" rule is enforced by the prompt, not
+  checked afterwards, and the retrieval benchmark covers one small document.
+- The default embedding model (all-MiniLM-L6-v2) is English-only; use a
+  multilingual one for other languages.
