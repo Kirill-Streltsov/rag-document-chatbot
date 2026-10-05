@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-import pytest
+import io
 
+import pytest
+from pypdf import PdfWriter
+
+from ragchat.config import Config
 from ragchat.ingest import (
     build_vectorstore,
+    ingest_pdfs,
     load_pdf,
     load_pdf_bytes,
     split_documents,
@@ -55,3 +60,13 @@ def test_build_vectorstore_indexes_all_chunks(sample_pages, fake_embeddings):
 def test_build_vectorstore_empty_raises(fake_embeddings):
     with pytest.raises(ValueError):
         build_vectorstore([], fake_embeddings)
+
+
+def test_ingest_rejects_pdf_without_text(fake_embeddings):
+    # A page with no text layer, like a scanned document.
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    buf = io.BytesIO()
+    writer.write(buf)
+    with pytest.raises(ValueError, match="scanned"):
+        ingest_pdfs([(buf.getvalue(), "scan.pdf")], fake_embeddings, Config())

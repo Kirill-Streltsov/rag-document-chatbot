@@ -94,7 +94,14 @@ def ingest_pdfs(
     """
     pages: list[Document] = []
     for data, name in sources:
-        pages.extend(load_pdf_bytes(data, name))
+        doc_pages = load_pdf_bytes(data, name)
+        if not any(p.page_content.strip() for p in doc_pages):
+            # pypdf only reads a PDF's text layer; a scan is just images.
+            raise ValueError(
+                f"No text could be extracted from {name}. It may be a scanned "
+                "PDF (images only); OCR is not supported."
+            )
+        pages.extend(doc_pages)
     chunks = split_documents(pages, cfg.chunk_size, cfg.chunk_overlap)
     store = build_vectorstore(chunks, embeddings)
     return store, len(chunks)
