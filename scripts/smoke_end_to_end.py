@@ -24,6 +24,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from dotenv import load_dotenv
+
 from ragchat.chain import answer, build_qa_chain, build_retriever
 from ragchat.config import Config
 from ragchat.embeddings import build_embeddings
@@ -40,6 +42,7 @@ QUESTIONS = [
 
 
 def main() -> int:
+    load_dotenv()  # pick up a local .env (see .env.example)
     cfg = Config.from_env()
     problems = cfg.validate()
     if problems:
@@ -62,6 +65,15 @@ def main() -> int:
         print(f"Q: {q}")
         print(f"A: {out['answer']}")
         print(f"   sources: {cites}\n")
+    # A follow-up that only makes sense with the previous turn.
+    history = [
+        {"role": "user", "content": "What was total revenue in 2024?"},
+        {"role": "assistant", "content": answer(chain, "What was total revenue in 2024?")["answer"]},
+    ]
+    out = answer(chain, "And in 2023?", history=history)
+    print("Q: And in 2023?  (follow-up)")
+    print(f"   searched for: {out['question']}")
+    print(f"A: {out['answer']}\n")
     print("END-TO-END SMOKE COMPLETE")
     return 0
 
