@@ -14,6 +14,7 @@ import os
 import time
 
 import streamlit as st
+from dotenv import load_dotenv
 
 from ragchat import (
     Config,
@@ -31,18 +32,27 @@ st.set_page_config(page_title="RAG Document Chatbot", page_icon="📄", layout="
 # --------------------------------------------------------------------------- #
 # Secrets / config helpers
 # --------------------------------------------------------------------------- #
-def _secret(name: str, default: str = "") -> str:
-    """Read a value from Streamlit secrets, then the environment."""
+def _export_secrets_to_env() -> None:
+    """Make root-level Streamlit secrets visible to ``Config.from_env``.
+
+    Values already set in the environment win, so a real env var or ``.env``
+    entry can still override a committed default.
+    """
     try:
-        if name in st.secrets:
-            return str(st.secrets[name])
+        items = dict(st.secrets)
     except Exception:
-        # No secrets.toml present (e.g. plain local run) - fall back to env.
-        pass
-    return os.getenv(name, default)
+        return  # no secrets.toml - nothing to export
+    for name, value in items.items():
+        if isinstance(value, str | int | float | bool):
+            os.environ.setdefault(name, str(value))
 
 
-DEFAULT_HF_TOKEN = _secret("HF_TOKEN") or _secret("HUGGINGFACEHUB_API_TOKEN")
+# Local runs can keep settings in a .env file (see .env.example); on Streamlit
+# Cloud they come from the app's secrets. Either way Config.from_env sees them.
+load_dotenv()
+_export_secrets_to_env()
+BASE_CFG = Config.from_env()
+DEFAULT_HF_TOKEN = BASE_CFG.hf_token
 
 
 # --------------------------------------------------------------------------- #
@@ -91,7 +101,7 @@ def sidebar() -> Config:
 
     use_openai = st.sidebar.toggle(
         "Use OpenAI instead of the free stack",
-        value=False,
+        value=BASE_CFG.llm_backend == "openai",
         help="Off = free HuggingFace stack (no key needed). On = OpenAI (bring your own key).",
     )
 
@@ -100,7 +110,7 @@ def sidebar() -> Config:
     if use_openai:
         backend = "openai"
         openai_key = st.sidebar.text_input(
-            "OpenAI API key", type="password", value=_secret("OPENAI_API_KEY")
+            "OpenAI API key", type="password", value=BASE_CFG.openai_api_key
         ).strip()
     else:
         backend = "huggingface"
@@ -113,19 +123,29 @@ def sidebar() -> Config:
             ).strip()
 
     with st.sidebar.expander("Advanced - chunking & retrieval"):
-        chunk_size = st.slider("Chunk size", 300, 1500, 1000, 100)
-        chunk_overlap = st.slider("Chunk overlap", 0, 400, 150, 50)
-        top_k = st.slider("Chunks retrieved (k)", 1, 8, 4, 1)
-        temperature = st.slider("Temperature", 0.0, 1.0, 0.0, 0.1)
+        # Start from the configured values (env / secrets), snapped onto the
+        # slider grids so an odd value like CHUNK_SIZE=777 cannot break them.
+        chunk_size = st.slider(
+            "Chunk size", 300, 1500, _snap(BASE_CFG.chunk_size, 300, 1500, 100), 100
+        )
+        chunk_overlap = st.slider(
+            "Chunk overlap", 0, 400, _snap(BASE_CFG.chunk_overlap, 0, 400, 50), 50
+        )
+        top_k = st.slider("Chunks retrieved (k)", 1, 8, _snap(BASE_CFG.top_k, 1, 8, 1), 1)
+        temperature = st.slider(
+            "Temperature", 0.0, 1.0, round(min(max(BASE_CFG.temperature, 0.0), 1.0), 1), 0.1
+        )
 
     st.sidebar.caption(
         "Defaults (chunk 1000 / overlap 150 / k 4) are empirically tuned - "
         "see docs/EXPERIMENTS.md."
     )
 
-    return Config(
-        embedding_backend=backend,  # type: ignore[arg-type]
-        llm_backend=backend,  # type: ignore[arg-type]
+    # Everything not exposed in the sidebar (model names, max_new_tokens, ...)
+    # keeps the value from the environment / secrets.
+    return BASE_CFG.with_overrides(
+        embedding_backend=backend,
+        llm_backend=backend,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
         top_k=top_k,
@@ -133,6 +153,12 @@ def sidebar() -> Config:
         hf_token=hf_token,
         openai_api_key=openai_key,
     )
+
+
+def _snap(value: float, lo: int, hi: int, step: int) -> int:
+    """Clamp ``value`` into [lo, hi] and round it onto the slider's step grid."""
+    value = min(max(value, lo), hi)
+    return int(lo + round((value - lo) / step) * step)
 
 
 # --------------------------------------------------------------------------- #
@@ -197,7 +223,9 @@ def main() -> None:
             )
 
     if build_clicked:
-        problems = [p for p in cfg.validate() if "overlap" in p]  # backend errors surface on query
+        # Only what indexing needs: the chunking and the embedding backend. LLM
+        # problems (missing HF token, ...) surface when the first question is asked.
+        problems = [p for p in cfg.validate() if "overlap" in p or "Embedding" in p]
         if problems:
             st.error(" ".join(problems))
         else:
